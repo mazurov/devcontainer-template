@@ -9,7 +9,9 @@ import (
 	"regexp"
 	"sort"
 
+	"github.com/mazurov/devcontainer-template/internal/logger"
 	"github.com/otiai10/copy"
+	"github.com/sirupsen/logrus"
 )
 
 // TemplateOption represents a configurable option in the template
@@ -37,12 +39,16 @@ type DevContainerTemplate struct {
 }
 
 func GenerateTemplate(source string, target string, options map[string]string) error {
+	log := logger.GetLogger()
+
+	log.WithField("source", source).Debug("Loading template")
 	template, err := loadTemplate(source)
 	if err != nil {
 		return err
 	}
 
 	// If template has no options defined but options were provided
+	log.Debug("Checking template options")
 	if template.Options == nil && len(options) > 0 {
 		return fmt.Errorf("template has no options defined, but got options: %v", options)
 	}
@@ -59,6 +65,10 @@ func GenerateTemplate(source string, target string, options map[string]string) e
 	// Add default values for options not provided
 	for optName, optDef := range template.Options {
 		if _, exists := options[optName]; !exists && optDef.Default != "" {
+			log.WithFields(logrus.Fields{
+				"option": optName,
+				"value":  optDef.Default,
+			}).Debug("Using default value for option")
 			options[optName] = optDef.Default
 		}
 	}
@@ -67,6 +77,7 @@ func GenerateTemplate(source string, target string, options map[string]string) e
 		return fmt.Errorf("failed to replace template options: %w", err)
 	}
 
+	log.WithField("target", target).Debug("Copying template to target directory")
 	// Create target directory if it doesn't exist
 	if err := os.MkdirAll(target, 0755); err != nil {
 		return fmt.Errorf("failed to create target directory: %w", err)
@@ -82,7 +93,10 @@ func GenerateTemplate(source string, target string, options map[string]string) e
 
 // CopyTemplateToTemp copies the template files to a temporary directory
 func copyTemplateToTemp(sourceDir string, template *DevContainerTemplate) (string, error) {
+	log := logger.GetLogger()
+
 	tmpDir, err := os.MkdirTemp("", "devcontainer-*")
+	log.WithField("tmpDir", tmpDir).Debug("Copying template to temporary directory")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp directory: %w", err)
 	}
