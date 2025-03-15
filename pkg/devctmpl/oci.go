@@ -113,7 +113,6 @@ func extractTar(r io.Reader, dest string) error {
 		}
 
 		target := filepath.Join(dest, header.Name)
-		// log.WithField("file", target).Debug("Extracting file")
 
 		switch header.Typeflag {
 		case tar.TypeDir:

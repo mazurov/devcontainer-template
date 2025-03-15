@@ -256,6 +256,16 @@ func prepareSource(source string) (string, func(), error) {
 		os.RemoveAll(tmpDir)
 	}
 
+	// For local directories, use copy instead of go-getter
+	if info, err := os.Stat(source); err == nil && info.IsDir() {
+		log.WithField("source", source).Debug("Copying local directory")
+		if err := copy.Copy(source, tmpDir); err != nil {
+			cleanup()
+			return "", nil, fmt.Errorf("failed to copy local directory: %w", err)
+		}
+		return tmpDir, cleanup, nil
+	}
+
 	// Check if it's an OCI reference
 	if isOCIRepository(source) {
 		log.WithField("source", source).Debug("Handling OCI source")
