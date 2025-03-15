@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -42,13 +43,14 @@ type DevContainerTemplate struct {
 type Config struct {
 	TmpRootDir string
 	KeepTmpDir bool
+	OmitPaths  []string
 }
 
 // NewConfig creates a new Config with default values
 func NewConfig() Config {
 	return Config{
-		TmpRootDir: "",
-		KeepTmpDir: false, // Set default to true
+		KeepTmpDir: false,
+		OmitPaths:  []string{},
 	}
 }
 
@@ -81,7 +83,7 @@ func GenerateTemplateWithConfig(source string, target string, options map[string
 	if err := checkOptions(template, options); err != nil {
 		return err
 	}
-	tmpDir, err := copyTemplateToTemp(source, template, cfg.TmpRootDir)
+	tmpDir, err := copyTemplateToTemp(source, template, cfg.TmpRootDir, cfg.OmitPaths)
 	if err != nil {
 		return err
 	}
@@ -150,7 +152,7 @@ func getTmpDir(tmpRootDir string, pattern string) (string, error) {
 }
 
 // CopyTemplateToTemp copies the template files to a temporary directory
-func copyTemplateToTemp(sourceDir string, template *DevContainerTemplate, tmpRootDir string) (string, error) {
+func copyTemplateToTemp(sourceDir string, template *DevContainerTemplate, tmpRootDir string, omitPaths []string) (string, error) {
 	tmpDir, err := getTmpDir(tmpRootDir, "devcontainer-*")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp directory: %w", err)
@@ -166,24 +168,43 @@ func copyTemplateToTemp(sourceDir string, template *DevContainerTemplate, tmpRoo
 	}
 
 	// Copy optional paths
+	sourceDirFs := os.DirFS(sourceDir)
 	for _, pattern := range template.OptionalPaths {
-		matches, err := filepath.Glob(filepath.Join(sourceDir, pattern))
+		matches, err := fs.Glob(sourceDirFs, pattern)
 		if err != nil {
 			os.RemoveAll(tmpDir)
 			return "", fmt.Errorf("invalid glob pattern '%s': %w", pattern, err)
 		}
 
 		for _, match := range matches {
-			relPath, err := filepath.Rel(sourceDir, match)
+			absMatch := filepath.Join(sourceDir, match)
+			relPath, err := filepath.Rel(sourceDir, absMatch)
 			if err != nil {
 				os.RemoveAll(tmpDir)
 				return "", fmt.Errorf("failed to get relative path: %w", err)
 			}
 
 			dst := filepath.Join(tmpDir, relPath)
-			if err := copy.Copy(match, dst); err != nil {
+			if err := copy.Copy(absMatch, dst); err != nil {
 				os.RemoveAll(tmpDir)
 				return "", fmt.Errorf("failed to copy '%s': %w", relPath, err)
+			}
+		}
+	}
+
+	// Remove folders and files in tmpDir that match omitPaths globs
+	tmpDirFs := os.DirFS(tmpDir)
+	for _, pattern := range omitPaths {
+		matches, err := fs.Glob(tmpDirFs, pattern)
+		if err != nil {
+			os.RemoveAll(tmpDir)
+			return "", fmt.Errorf("invalid glob pattern '%s': %w", pattern, err)
+		}
+
+		for _, match := range matches {
+			if err := os.RemoveAll(filepath.Join(tmpDir, match)); err != nil {
+				os.RemoveAll(tmpDir)
+				return "", fmt.Errorf("failed to remove '%s': %w", match, err)
 			}
 		}
 	}

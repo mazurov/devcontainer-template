@@ -19,6 +19,7 @@ func main() {
 		logLevel        string
 		tmpDir          string
 		keepTmpDir      bool
+		omitPaths       string
 	)
 
 	cmd := &cobra.Command{
@@ -42,6 +43,14 @@ func main() {
 				}
 			}
 
+			omitPathsArray := make([]string, 0)
+			if omitPaths != "" {
+				log.Debug("Parsing omit paths arguments")
+				if err := json.Unmarshal([]byte(omitPaths), &omitPathsArray); err != nil {
+					return fmt.Errorf("invalid omit paths JSON: %w", err)
+				}
+			}
+
 			log.WithFields(logrus.Fields{
 				"templateID": templateID,
 				"workspace":  workspaceFolder,
@@ -52,6 +61,7 @@ func main() {
 			config := devctmpl.NewConfig()
 			config.TmpRootDir = tmpDir
 			config.KeepTmpDir = keepTmpDir
+			config.OmitPaths = omitPathsArray
 			if err := devctmpl.GenerateTemplateWithConfig(templateID, workspaceFolder, options, config); err != nil {
 				return fmt.Errorf("failed to generate template: %w", err)
 			}
@@ -67,6 +77,7 @@ func main() {
 	cmd.Flags().StringVarP(&templateArgs, "template-args", "a", "", "Template arguments as JSON string")
 	cmd.Flags().StringVarP(&tmpDir, "tmp-dir", "", "", "Directory to use for temporary files. If not provided, the system default will be used.")
 	cmd.Flags().BoolVarP(&keepTmpDir, "keep-tmp-dir", "", false, "Keep temporary directory after execution")
+	cmd.Flags().StringVarP(&omitPaths, "omit-paths", "", "", "List of paths within the Template to omit applying, provided as JSON.  To ignore a directory append '/*'")
 
 	cmd.PersistentFlags().StringVarP(&logLevel, "log-level", "l", "info", "Log level (debug, info, warn, error)")
 	// Mark required flags
