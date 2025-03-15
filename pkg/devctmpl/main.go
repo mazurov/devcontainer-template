@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/hashicorp/go-getter"
 	"github.com/mazurov/devcontainer-template/internal/logger"
@@ -276,10 +277,19 @@ func prepareSource(source string) (string, func(), error) {
 		return tmpDir, cleanup, nil
 	}
 
+	pwd, err := os.Getwd()
+	if err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	// Expand . and .. if source starts with file://
+	source = strings.TrimPrefix(source, "file://")
 	// Handle other sources using go-getter
 	client := &getter.Client{
 		Src:  source,
 		Dst:  tmpDir,
+		Pwd:  pwd,
 		Mode: getter.ClientModeDir,
 		Options: []getter.ClientOption{
 			getter.WithProgress(nil),

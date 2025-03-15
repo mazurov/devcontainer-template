@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -15,48 +14,13 @@ import (
 	"github.com/mazurov/devcontainer-template/internal/logger"
 )
 
-// archiveExtensions lists common archive file extensions
-var archiveExtensions = []string{".tar", ".zip", ".tgz", ".tar.gz", ".tar.bz2", ".tar.xz"}
-
-// isLocalDirectory checks if the given path is a valid local directory
-func isLocalDirectory(source string) bool {
-	if _, err := os.Stat(source); err == nil {
-		return true
-	}
-	return false
-}
-
-// isRemoteArchive checks if the given URL points to an archive file
-func isRemoteArchive(source string) bool {
-	parsedURL, err := url.Parse(source)
-	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
-		return false
-	}
-
-	// Check if the URL ends with a known archive extension
-	for _, ext := range archiveExtensions {
-		if strings.HasSuffix(parsedURL.Path, ext) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // IsNotOCIRepository determines if the given source is NOT an OCI repository
 func isOCIRepository(source string) bool {
-	// 1. Check if it's a local directory
-	if isLocalDirectory(source) {
-		return false
+	u, err := url.Parse(source)
+	if err != nil {
+		return true
 	}
-
-	// 2. Check if it's a remote archive
-	if isRemoteArchive(source) {
-		return false
-	}
-
-	// 3. Otherwise, assume it's an OCI repository
-	return true
+	return u.Scheme == ""
 }
 
 func pullOCITemplate(reference string, destDir string) error {
