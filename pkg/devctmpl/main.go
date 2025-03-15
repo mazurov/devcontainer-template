@@ -11,9 +11,7 @@ import (
 	"strings"
 
 	"github.com/hashicorp/go-getter"
-	"github.com/mazurov/devcontainer-template/internal/logger"
 	"github.com/otiai10/copy"
-	"github.com/sirupsen/logrus"
 )
 
 // TemplateOption represents a configurable option in the template
@@ -41,8 +39,6 @@ type DevContainerTemplate struct {
 }
 
 func GenerateTemplate(source string, target string, options map[string]string) error {
-	log := logger.GetLogger()
-
 	// Prepare source directory
 	source, cleanup, err := prepareSource(source)
 	if err != nil {
@@ -50,14 +46,12 @@ func GenerateTemplate(source string, target string, options map[string]string) e
 	}
 	defer cleanup()
 
-	log.WithField("source", source).Debug("Loading template")
 	template, err := loadTemplate(source)
 	if err != nil {
 		return err
 	}
 
 	// If template has no options defined but options were provided
-	log.Debug("Checking template options")
 	if template.Options == nil && len(options) > 0 {
 		return fmt.Errorf("template has no options defined, but got options: %v", options)
 	}
@@ -74,10 +68,6 @@ func GenerateTemplate(source string, target string, options map[string]string) e
 	// Add default values for options not provided
 	for optName, optDef := range template.Options {
 		if _, exists := options[optName]; !exists && optDef.Default != "" {
-			log.WithFields(logrus.Fields{
-				"option": optName,
-				"value":  optDef.Default,
-			}).Debug("Using default value for option")
 			options[optName] = optDef.Default
 		}
 	}
@@ -86,7 +76,6 @@ func GenerateTemplate(source string, target string, options map[string]string) e
 		return fmt.Errorf("failed to replace template options: %w", err)
 	}
 
-	log.WithField("target", target).Debug("Copying template to target directory")
 	// Create target directory if it doesn't exist
 	if err := os.MkdirAll(target, 0755); err != nil {
 		return fmt.Errorf("failed to create target directory: %w", err)
@@ -102,10 +91,7 @@ func GenerateTemplate(source string, target string, options map[string]string) e
 
 // CopyTemplateToTemp copies the template files to a temporary directory
 func copyTemplateToTemp(sourceDir string, template *DevContainerTemplate) (string, error) {
-	log := logger.GetLogger()
-
 	tmpDir, err := os.MkdirTemp("", "devcontainer-*")
-	log.WithField("tmpDir", tmpDir).Debug("Copying template to temporary directory")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp directory: %w", err)
 	}
@@ -244,8 +230,6 @@ func loadTemplate(dir string) (*DevContainerTemplate, error) {
 
 // PrepareSource downloads/copies the source to a temporary directory
 func prepareSource(source string) (string, func(), error) {
-	log := logger.GetLogger()
-
 	// Create temporary directory
 	tmpDir, err := os.MkdirTemp("", "devcontainer-source-*")
 	if err != nil {
@@ -253,13 +237,11 @@ func prepareSource(source string) (string, func(), error) {
 	}
 
 	cleanup := func() {
-		log.WithField("path", tmpDir).Debug("Cleaning up temporary directory")
 		os.RemoveAll(tmpDir)
 	}
 
 	// For local directories, use copy instead of go-getter
 	if info, err := os.Stat(source); err == nil && info.IsDir() {
-		log.WithField("source", source).Debug("Copying local directory")
 		if err := copy.Copy(source, tmpDir); err != nil {
 			cleanup()
 			return "", nil, fmt.Errorf("failed to copy local directory: %w", err)
@@ -269,7 +251,6 @@ func prepareSource(source string) (string, func(), error) {
 
 	// Check if it's an OCI reference
 	if isOCIRepository(source) {
-		log.WithField("source", source).Debug("Handling OCI source")
 		if err := pullOCITemplate(source, tmpDir); err != nil {
 			cleanup()
 			return "", nil, err
