@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 
+	"github.com/hashicorp/go-getter"
 	"github.com/mazurov/devcontainer-template/internal/logger"
 	"github.com/otiai10/copy"
 	"github.com/sirupsen/logrus"
@@ -40,6 +41,13 @@ type DevContainerTemplate struct {
 
 func GenerateTemplate(source string, target string, options map[string]string) error {
 	log := logger.GetLogger()
+
+	// Prepare source directory
+	source, cleanup, err := prepareSource(source)
+	if err != nil {
+		return fmt.Errorf("failed to prepare source: %w", err)
+	}
+	defer cleanup()
 
 	log.WithField("source", source).Debug("Loading template")
 	template, err := loadTemplate(source)
@@ -231,4 +239,78 @@ func loadTemplate(dir string) (*DevContainerTemplate, error) {
 	}
 
 	return template, nil
+}
+
+// PrepareSource downloads/copies the source to a temporary directory
+func prepareSource(source string) (string, func(), error) {
+	log := logger.GetLogger()
+
+	// Create temporary directory
+	tmpDir, err := os.MkdirTemp("", "devcontainer-source-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+
+	cleanup := func() {
+		log.WithField("path", tmpDir).Debug("Cleaning up temporary directory")
+		os.RemoveAll(tmpDir)
+	}
+
+	// Check if it's an OCI reference
+	if isOCIRepository(source) {
+		log.WithField("source", source).Debug("Handling OCI source")
+		if err := pullOCITemplate(source, tmpDir); err != nil {
+			cleanup()
+			return "", nil, err
+		}
+		return tmpDir, cleanup, nil
+	}
+
+	// Handle other sources using go-getter
+	client := &getter.Client{
+		Src:  source,
+		Dst:  tmpDir,
+		Mode: getter.ClientModeDir,
+		Options: []getter.ClientOption{
+			getter.WithProgress(nil),
+		},
+	}
+
+	if err := client.Get(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("failed to get source: %w", err)
+	}
+
+	// Find the actual template directory
+	templateDir, err := findTemplateDir(tmpDir)
+	if err != nil {
+		cleanup()
+		return "", nil, err
+	}
+
+	return templateDir, cleanup, nil
+}
+
+func findTemplateDir(dir string) (string, error) {
+	// Check current directory
+	if _, err := os.Stat(filepath.Join(dir, "devcontainer-template.json")); err == nil {
+		return dir, nil
+	}
+
+	// Check immediate subdirectories
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			path := filepath.Join(dir, entry.Name())
+			if _, err := os.Stat(filepath.Join(path, "devcontainer-template.json")); err == nil {
+				return path, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("devcontainer-template.json not found in %s or its subdirectories", dir)
 }
