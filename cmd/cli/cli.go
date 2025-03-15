@@ -17,6 +17,8 @@ func main() {
 		templateID      string
 		templateArgs    string
 		logLevel        string
+		tmpDir          string
+		keepTmpDir      bool
 	)
 
 	cmd := &cobra.Command{
@@ -47,7 +49,10 @@ func main() {
 			}).Info("Generating template")
 
 			// Call GenerateTemplate
-			if err := devctmpl.GenerateTemplate(templateID, workspaceFolder, options); err != nil {
+			config := devctmpl.NewConfig()
+			config.TmpRootDir = tmpDir
+			config.KeepTmpDir = keepTmpDir
+			if err := devctmpl.GenerateTemplateWithConfig(templateID, workspaceFolder, options, config); err != nil {
 				return fmt.Errorf("failed to generate template: %w", err)
 			}
 
@@ -60,6 +65,9 @@ func main() {
 	cmd.Flags().StringVarP(&workspaceFolder, "workspace-folder", "w", "", "Target workspace folder")
 	cmd.Flags().StringVarP(&templateID, "template-id", "t", "", "Source template directory")
 	cmd.Flags().StringVarP(&templateArgs, "template-args", "a", "", "Template arguments as JSON string")
+	cmd.Flags().StringVarP(&tmpDir, "tmp-dir", "", "", "Directory to use for temporary files. If not provided, the system default will be used.")
+	cmd.Flags().BoolVarP(&keepTmpDir, "keep-tmp-dir", "", false, "Keep temporary directory after execution")
+
 	cmd.PersistentFlags().StringVarP(&logLevel, "log-level", "l", "info", "Log level (debug, info, warn, error)")
 	// Mark required flags
 	cmd.MarkFlagRequired("workspace-folder")

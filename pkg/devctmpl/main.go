@@ -1,6 +1,7 @@
 package devctmpl
 
 import (
+	"embed"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -38,13 +39,33 @@ type DevContainerTemplate struct {
 	OptionalPaths    []string                  `json:"optionalPaths,omitempty"`
 }
 
+type Config struct {
+	TmpRootDir string
+	KeepTmpDir bool
+}
+
+// NewConfig creates a new Config with default values
+func NewConfig() Config {
+	return Config{
+		TmpRootDir: "",
+		KeepTmpDir: false, // Set default to true
+	}
+}
+
 func GenerateTemplate(source string, target string, options map[string]string) error {
+	return GenerateTemplateWithConfig(source, target, options, Config{})
+}
+
+func GenerateTemplateWithConfig(source string, target string, options map[string]string, cfg Config) error {
 	// Prepare source directory
-	source, cleanup, err := prepareSource(source)
+	source, cleanup, err := prepareSource(source, cfg.TmpRootDir)
 	if err != nil {
 		return fmt.Errorf("failed to prepare source: %w", err)
 	}
-	defer cleanup()
+
+	if !cfg.KeepTmpDir {
+		defer cleanup()
+	}
 
 	template, err := loadTemplate(source)
 	if err != nil {
@@ -60,7 +81,7 @@ func GenerateTemplate(source string, target string, options map[string]string) e
 	if err := checkOptions(template, options); err != nil {
 		return err
 	}
-	tmpDir, err := copyTemplateToTemp(source, template)
+	tmpDir, err := copyTemplateToTemp(source, template, cfg.TmpRootDir)
 	if err != nil {
 		return err
 	}
@@ -89,9 +110,48 @@ func GenerateTemplate(source string, target string, options map[string]string) e
 	return nil
 }
 
+func GenerateFromEmbedWithConfig(source embed.FS, target string, options map[string]string, cfg Config) error {
+	tmpDir, err := getTmpDir(cfg.TmpRootDir, "devcontainer-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	entries, err := source.ReadDir(".")
+	if err != nil {
+		return fmt.Errorf("failed to read embedded source: %w", err)
+	}
+
+	for _, entry := range entries {
+		srcPath := entry.Name()
+		dstPath := filepath.Join(tmpDir, srcPath)
+
+		if entry.IsDir() {
+			if err := copy.Copy(srcPath, dstPath); err != nil {
+				return fmt.Errorf("failed to copy directory %s: %w", srcPath, err)
+			}
+		} else {
+			data, err := source.ReadFile(srcPath)
+			if err != nil {
+				return fmt.Errorf("failed to read file %s: %w", srcPath, err)
+			}
+			if err := os.WriteFile(dstPath, data, 0644); err != nil {
+				return fmt.Errorf("failed to write file %s: %w", dstPath, err)
+			}
+		}
+	}
+
+	return GenerateTemplateWithConfig(tmpDir, target, options, cfg)
+}
+
+func getTmpDir(tmpRootDir string, pattern string) (string, error) {
+	// Create temporary directory
+	return os.MkdirTemp(tmpRootDir, pattern)
+}
+
 // CopyTemplateToTemp copies the template files to a temporary directory
-func copyTemplateToTemp(sourceDir string, template *DevContainerTemplate) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "devcontainer-*")
+func copyTemplateToTemp(sourceDir string, template *DevContainerTemplate, tmpRootDir string) (string, error) {
+	tmpDir, err := getTmpDir(tmpRootDir, "devcontainer-*")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp directory: %w", err)
 	}
@@ -229,9 +289,8 @@ func loadTemplate(dir string) (*DevContainerTemplate, error) {
 }
 
 // PrepareSource downloads/copies the source to a temporary directory
-func prepareSource(source string) (string, func(), error) {
-	// Create temporary directory
-	tmpDir, err := os.MkdirTemp("", "devcontainer-source-*")
+func prepareSource(source string, tmpDirRoot string) (string, func(), error) {
+	tmpDir, err := getTmpDir(tmpDirRoot, "devcontainer-source-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
