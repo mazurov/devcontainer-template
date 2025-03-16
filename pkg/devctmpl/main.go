@@ -215,50 +215,50 @@ func copyTemplateToTemp(sourceDir string, template *DevContainerTemplate, tmpRoo
 // ReplaceTemplateOptions walks through all files in the directory and replaces
 // template variables of the form ${templateOption:key} with their corresponding values
 func replaceTemplateOptions(dir string, options map[string]string) error {
-	// Compile regex for finding template variables
-	varRegex := regexp.MustCompile(`\${templateOption:([^}]+)}`)
+    // Compile regex for finding template variables
+    varRegex := regexp.MustCompile(`\${templateOption:([^}]+)}`)
 
-	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
+    return fs.WalkDir(os.DirFS(dir), ".", func(path string, d fs.DirEntry, err error) error {
+        if err != nil {
+            return err
+        }
 
-		// Skip directories
-		if info.IsDir() {
-			return nil
-		}
+        // Skip directories
+        if d.IsDir() {
+            return nil
+        }
 
-		// Read file content
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("failed to read file %s: %w", path, err)
-		}
+        // Read file content
+		content, err := os.ReadFile(filepath.Join(dir, path))
+        if err != nil {
+            return fmt.Errorf("failed to read file %s: %w", path, err)
+        }
 
-		// Check if file contains any template variables
-		if !varRegex.Match(content) {
-			return nil
-		}
+        // Check if file contains any template variables
+        if !varRegex.Match(content) {
+            return nil
+        }
 
-		// Replace all template variables
-		newContent := varRegex.ReplaceAllFunc(content, func(match []byte) []byte {
-			// Extract key from ${templateOption:key}
-			key := varRegex.FindSubmatch(match)[1]
+        // Replace all template variables
+        newContent := varRegex.ReplaceAllFunc(content, func(match []byte) []byte {
+            // Extract key from ${templateOption:key}
+            key := varRegex.FindSubmatch(match)[1]
 
-			// Get value from options map
-			if value, exists := options[string(key)]; exists {
-				return []byte(value)
-			}
-			// If no value found, leave original template variable
-			return match
-		})
+            // Get value from options map
+            if value, exists := options[string(key)]; exists {
+                return []byte(value)
+            }
+            // If no value found, leave original template variable
+            return match
+        })
 
-		// Write modified content back to file
-		if err := os.WriteFile(path, newContent, info.Mode()); err != nil {
-			return fmt.Errorf("failed to write file %s: %w", path, err)
-		}
+        // Write modified content back to file
+        if err := os.WriteFile(filepath.Join(dir, path), newContent, d.Type().Perm()); err != nil {
+            return fmt.Errorf("failed to write file %s: %w", path, err)
+        }
 
-		return nil
-	})
+        return nil
+    })
 }
 
 func checkOptions(template *DevContainerTemplate, options map[string]string) error {
