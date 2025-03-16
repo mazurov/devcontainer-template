@@ -158,36 +158,47 @@ func copyTemplateToTemp(sourceDir string, template *DevContainerTemplate, tmpRoo
 		return "", fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
-	// Copy .devcontainer folder
-	devcontainerSrc := filepath.Join(sourceDir, ".devcontainer")
-	devcontainerDst := filepath.Join(tmpDir, ".devcontainer")
-
-	if err := copy.Copy(devcontainerSrc, devcontainerDst); err != nil {
+	devContainerLocation, err := findDevContainerJson(sourceDir)
+	if err != nil {
 		os.RemoveAll(tmpDir)
-		return "", fmt.Errorf("failed to copy .devcontainer folder: %w", err)
+		return "", err
+	}
+
+	if devContainerLocation != devContainerDir {
+		if err := copy.Copy(".devcontainer.json", tmpDir); err != nil {
+			os.RemoveAll(tmpDir)
+			return "", fmt.Errorf("failed to copy .devcontainer.json file: %w", err)
+		}
+	}
+	if devContainerLocation != parentDir {
+		// Copy .devcontainer folder
+		devcontainerSrc := filepath.Join(sourceDir, ".devcontainer")
+		devcontainerDst := filepath.Join(tmpDir, ".devcontainer")
+
+		if err := copy.Copy(devcontainerSrc, devcontainerDst); err != nil {
+			os.RemoveAll(tmpDir)
+			return "", fmt.Errorf("failed to copy .devcontainer folder: %w", err)
+		}
 	}
 
 	// Copy optional paths
 	sourceDirFs := os.DirFS(sourceDir)
 	for _, pattern := range template.OptionalPaths {
-		matches, err := fs.Glob(sourceDirFs, pattern)
-		if err != nil {
-			os.RemoveAll(tmpDir)
-			return "", fmt.Errorf("invalid glob pattern '%s': %w", pattern, err)
-		}
 
-		for _, match := range matches {
-			absMatch := filepath.Join(sourceDir, match)
-			relPath, err := filepath.Rel(sourceDir, absMatch)
-			if err != nil {
-				os.RemoveAll(tmpDir)
-				return "", fmt.Errorf("failed to get relative path: %w", err)
+		if strings.HasPrefix(pattern, "/*") && len(pattern) > 3 {
+			dirToCopy := strings.TrimPrefix(pattern, "/*")
+			if info, err := fs.Stat(sourceDirFs, dirToCopy); err == nil && info.IsDir() {
+				if err := copy.Copy(filepath.Join(sourceDir, dirToCopy), filepath.Join(tmpDir, dirToCopy)); err != nil {
+					os.RemoveAll(tmpDir)
+					return "", fmt.Errorf("failed to copy directory '%s': %w", dirToCopy, err)
+				}
 			}
-
-			dst := filepath.Join(tmpDir, relPath)
-			if err := copy.Copy(absMatch, dst); err != nil {
-				os.RemoveAll(tmpDir)
-				return "", fmt.Errorf("failed to copy '%s': %w", relPath, err)
+		} else {
+			if info, err := fs.Stat(sourceDirFs, pattern); err == nil && !info.IsDir() {
+				if err := copy.Copy(filepath.Join(sourceDir, pattern), filepath.Join(tmpDir, pattern)); err != nil {
+					os.RemoveAll(tmpDir)
+					return "", fmt.Errorf("failed to copy file '%s': %w", pattern, err)
+				}
 			}
 		}
 	}
@@ -195,16 +206,20 @@ func copyTemplateToTemp(sourceDir string, template *DevContainerTemplate, tmpRoo
 	// Remove folders and files in tmpDir that match omitPaths globs
 	tmpDirFs := os.DirFS(tmpDir)
 	for _, pattern := range omitPaths {
-		matches, err := fs.Glob(tmpDirFs, pattern)
-		if err != nil {
-			os.RemoveAll(tmpDir)
-			return "", fmt.Errorf("invalid glob pattern '%s': %w", pattern, err)
-		}
-
-		for _, match := range matches {
-			if err := os.RemoveAll(filepath.Join(tmpDir, match)); err != nil {
-				os.RemoveAll(tmpDir)
-				return "", fmt.Errorf("failed to remove '%s': %w", match, err)
+		if strings.HasPrefix(pattern, "/*") && len(pattern) > 3 {
+			dirToRemove := strings.TrimPrefix(pattern, "/*")
+			if info, err := fs.Stat(tmpDirFs, dirToRemove); err == nil && info.IsDir() {
+				if err := os.RemoveAll(filepath.Join(tmpDir, dirToRemove)); err != nil {
+					os.RemoveAll(tmpDir)
+					return "", fmt.Errorf("failed to remove directory '%s': %w", dirToRemove, err)
+				}
+			}
+		} else {
+			if info, err := fs.Stat(tmpDirFs, pattern); err == nil && !info.IsDir() {
+				if err := os.Remove(filepath.Join(tmpDir, pattern)); err != nil {
+					os.RemoveAll(tmpDir)
+					return "", fmt.Errorf("failed to remove file '%s': %w", pattern, err)
+				}
 			}
 		}
 	}
@@ -215,50 +230,50 @@ func copyTemplateToTemp(sourceDir string, template *DevContainerTemplate, tmpRoo
 // ReplaceTemplateOptions walks through all files in the directory and replaces
 // template variables of the form ${templateOption:key} with their corresponding values
 func replaceTemplateOptions(dir string, options map[string]string) error {
-    // Compile regex for finding template variables
-    varRegex := regexp.MustCompile(`\${templateOption:([^}]+)}`)
+	// Compile regex for finding template variables
+	varRegex := regexp.MustCompile(`\${templateOption:([^}]+)}`)
 
-    return fs.WalkDir(os.DirFS(dir), ".", func(path string, d fs.DirEntry, err error) error {
-        if err != nil {
-            return err
-        }
+	return fs.WalkDir(os.DirFS(dir), ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
 
-        // Skip directories
-        if d.IsDir() {
-            return nil
-        }
+		// Skip directories
+		if d.IsDir() {
+			return nil
+		}
 
-        // Read file content
+		// Read file content
 		content, err := os.ReadFile(filepath.Join(dir, path))
-        if err != nil {
-            return fmt.Errorf("failed to read file %s: %w", path, err)
-        }
+		if err != nil {
+			return fmt.Errorf("failed to read file %s: %w", path, err)
+		}
 
-        // Check if file contains any template variables
-        if !varRegex.Match(content) {
-            return nil
-        }
+		// Check if file contains any template variables
+		if !varRegex.Match(content) {
+			return nil
+		}
 
-        // Replace all template variables
-        newContent := varRegex.ReplaceAllFunc(content, func(match []byte) []byte {
-            // Extract key from ${templateOption:key}
-            key := varRegex.FindSubmatch(match)[1]
+		// Replace all template variables
+		newContent := varRegex.ReplaceAllFunc(content, func(match []byte) []byte {
+			// Extract key from ${templateOption:key}
+			key := varRegex.FindSubmatch(match)[1]
 
-            // Get value from options map
-            if value, exists := options[string(key)]; exists {
-                return []byte(value)
-            }
-            // If no value found, leave original template variable
-            return match
-        })
+			// Get value from options map
+			if value, exists := options[string(key)]; exists {
+				return []byte(value)
+			}
+			// If no value found, leave original template variable
+			return match
+		})
 
-        // Write modified content back to file
-        if err := os.WriteFile(filepath.Join(dir, path), newContent, d.Type().Perm()); err != nil {
-            return fmt.Errorf("failed to write file %s: %w", path, err)
-        }
+		// Write modified content back to file
+		if err := os.WriteFile(filepath.Join(dir, path), newContent, d.Type().Perm()); err != nil {
+			return fmt.Errorf("failed to write file %s: %w", path, err)
+		}
 
-        return nil
-    })
+		return nil
+	})
 }
 
 func checkOptions(template *DevContainerTemplate, options map[string]string) error {
@@ -290,6 +305,55 @@ func parseTemplate(content []byte) (*DevContainerTemplate, error) {
 	return &template, nil
 }
 
+type devContainerLocation int
+
+const (
+	parentDir devContainerLocation = iota
+	devContainerDir
+	parentAndDevContainer
+)
+
+func findDevContainerJson(dir string) (devContainerLocation, error) {
+	// Check if .devcontainer.json exists in the parent directory
+	devcontainerJsonPath := filepath.Join(dir, ".devcontainer.json")
+	parentExists := false
+	if _, err := os.Stat(devcontainerJsonPath); err == nil {
+		parentExists = true
+	}
+
+	// Check if .devcontainer/devcontainer.json exists
+	devcontainerPath := filepath.Join(dir, ".devcontainer", "devcontainer.json")
+	devContainerExists := false
+	if _, err := os.Stat(devcontainerPath); err == nil {
+		devContainerExists = true
+	}
+
+	// Check if .devcontainer/<folder>/devcontainer.json exists (one level deep)
+	devcontainerDir := filepath.Join(dir, ".devcontainer")
+	entries, err := os.ReadDir(devcontainerDir)
+	if err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				subDirPath := filepath.Join(devcontainerDir, entry.Name(), "devcontainer.json")
+				if _, err := os.Stat(subDirPath); err == nil {
+					devContainerExists = true
+					break
+				}
+			}
+		}
+	}
+
+	if parentExists && devContainerExists {
+		return parentAndDevContainer, nil
+	} else if parentExists {
+		return parentDir, nil
+	} else if devContainerExists {
+		return devContainerDir, nil
+	}
+
+	return 0, fmt.Errorf("devcontainer.json not found in %s or its subdirectories", dir)
+}
+
 func loadTemplate(dir string) (*DevContainerTemplate, error) {
 	content, err := os.ReadFile(filepath.Join(dir, "devcontainer-template.json"))
 	if err != nil {
@@ -302,8 +366,9 @@ func loadTemplate(dir string) (*DevContainerTemplate, error) {
 		return nil, fmt.Errorf("error parsing template in directory %s: %v", dir, err)
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, ".devcontainer", "devcontainer.json")); os.IsNotExist(err) {
-		return template, fmt.Errorf(".devcontainer/devcontainer.json file does not exist in directory %s", dir)
+	_, err = findDevContainerJson(dir)
+	if err != nil {
+		return template, err
 	}
 
 	return template, nil
@@ -311,6 +376,13 @@ func loadTemplate(dir string) (*DevContainerTemplate, error) {
 
 // PrepareSource downloads/copies the source to a temporary directory
 func prepareSource(source string, tmpDirRoot string) (string, func(), error) {
+	nocleanup := func() {}
+
+	// For local directories, use copy instead of go-getter
+	if info, err := os.Stat(source); err == nil && info.IsDir() {
+		return source, nocleanup, nil
+	}
+
 	tmpDir, err := getTmpDir(tmpDirRoot, "devcontainer-source-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create temp directory: %w", err)
@@ -318,15 +390,6 @@ func prepareSource(source string, tmpDirRoot string) (string, func(), error) {
 
 	cleanup := func() {
 		os.RemoveAll(tmpDir)
-	}
-
-	// For local directories, use copy instead of go-getter
-	if info, err := os.Stat(source); err == nil && info.IsDir() {
-		if err := copy.Copy(source, tmpDir); err != nil {
-			cleanup()
-			return "", nil, fmt.Errorf("failed to copy local directory: %w", err)
-		}
-		return tmpDir, cleanup, nil
 	}
 
 	// Check if it's an OCI reference

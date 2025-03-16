@@ -4,35 +4,36 @@ import (
 	"archive/tar"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/mazurov/devcontainer-template/internal/logger"
 )
 
 // IsNotOCIRepository determines if the given source is NOT an OCI repository
 func isOCIRepository(source string) bool {
-	u, err := url.Parse(source)
-	if err != nil {
-		return true
+	if _, err := os.Stat(source); err == nil {
+		return false
 	}
-	return u.Scheme == ""
+
+	// Check if the source contains URL-specific characters
+	if strings.Contains(source, "//") || strings.Contains(source, "?") {
+		return false
+	}
+
+	_, err := name.ParseReference(source)
+	return err == nil
 }
 
 func pullOCITemplate(reference string, destDir string) error {
-	log := logger.GetLogger()
-
 	// Parse the reference
 	ref, err := name.ParseReference(reference)
 	if err != nil {
 		return fmt.Errorf("invalid reference %q: %w", reference, err)
 	}
-
-	log.WithField("reference", reference).Debug("Pulling OCI artifact")
 
 	// Pull the image
 	img, err := remote.Image(ref, remote.WithAuthFromKeychain(authn.DefaultKeychain))
