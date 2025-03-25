@@ -170,6 +170,7 @@ func copyTemplateToTemp(sourceDir string, template *DevContainerTemplate, tmpRoo
 			return "", fmt.Errorf("failed to copy .devcontainer.json file: %w", err)
 		}
 	}
+
 	if devContainerLocation != parentDir {
 		// Copy .devcontainer folder
 		devcontainerSrc := filepath.Join(sourceDir, ".devcontainer")
@@ -226,6 +227,13 @@ func copyTemplateToTemp(sourceDir string, template *DevContainerTemplate, tmpRoo
 
 	return tmpDir, nil
 }
+
+// func validateTemplateOptions(options map[string]string, templateOptions map[string]TemplateOption) error {
+// 	for key, option := range templateOptions {
+
+// 	}
+// 	return nil
+// }
 
 // ReplaceTemplateOptions walks through all files in the directory and replaces
 // template variables of the form ${templateOption:key} with their corresponding values
@@ -313,20 +321,20 @@ const (
 	parentAndDevContainer
 )
 
+// Helper function to check if a specific devcontainer.json file exists
+func checkDevContainerJson(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func findDevContainerJson(dir string) (devContainerLocation, error) {
 	// Check if .devcontainer.json exists in the parent directory
 	devcontainerJsonPath := filepath.Join(dir, ".devcontainer.json")
-	parentExists := false
-	if _, err := os.Stat(devcontainerJsonPath); err == nil {
-		parentExists = true
-	}
+	parentExists := checkDevContainerJson(devcontainerJsonPath)
 
 	// Check if .devcontainer/devcontainer.json exists
 	devcontainerPath := filepath.Join(dir, ".devcontainer", "devcontainer.json")
-	devContainerExists := false
-	if _, err := os.Stat(devcontainerPath); err == nil {
-		devContainerExists = true
-	}
+	devContainerExists := checkDevContainerJson(devcontainerPath)
 
 	// Check if .devcontainer/<folder>/devcontainer.json exists (one level deep)
 	devcontainerDir := filepath.Join(dir, ".devcontainer")
@@ -335,7 +343,7 @@ func findDevContainerJson(dir string) (devContainerLocation, error) {
 		for _, entry := range entries {
 			if entry.IsDir() {
 				subDirPath := filepath.Join(devcontainerDir, entry.Name(), "devcontainer.json")
-				if _, err := os.Stat(subDirPath); err == nil {
+				if checkDevContainerJson(subDirPath) {
 					devContainerExists = true
 					break
 				}

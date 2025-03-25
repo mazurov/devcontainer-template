@@ -46,7 +46,7 @@ devctmpl -w /path/to/workspace -t template-id --template-args '{"key": "value"}'
 ### Flags
 
 - `-w, --workspace-folder`: Target workspace folder (required)
-- `-t, --template-id`: Source template directory (required)
+- `-t, --template-id`: Source template directory (OCI repo, archive) (required)
 - `-a, --template-args`: Template arguments as JSON string
 - `--tmp-dir`: Directory to use for temporary files. If not provided, the system default will be used.
 - `--keep-tmp-dir`: Keep temporary directory after execution
