@@ -57,3 +57,6 @@ help:
 	@echo "  make test    - Run tests with coverage"
 	@echo "  make tidy    - Cleanup dependencies"
 	@echo "  make clean   - Clean up binaries"
+
+test:
+  echo "Hello"
